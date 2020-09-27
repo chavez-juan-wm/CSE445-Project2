@@ -9,11 +9,11 @@ namespace eCommerce
 
     public class MultiCellBuffer
     {
+        private static Semaphore semaphore;
         //Need to implement data cells don't really know what these are specifically, are they just OrderObjects? 
         //From specs we need to implement a semaphore and need a lock mechanism for this, this will most likely take the most time out of the project. <<<
         public void setOneCell()
         {
-
         }
         public void getOneCell() //Don't know what return type it should be yet.
         {
@@ -148,29 +148,30 @@ namespace eCommerce
                 // Decide the price based on the orders 
                 
                 Int32 r = rng.Next(1, 20);
+                Int32 q = rng.Next(85000, 86556);
                 // Console.WriteLine("New Price is {0}", p); 
-                Park2.PriceModel(currentDay, r);
+                Park2.PriceModel(currentDay, r, q);
                 currentDay++;
                 currentDay %= 5;
             }
         }
-        public static void PriceModel(int weekday, int numberOfTickets) //Need to have two price models for different parks<<<
+        public static void PriceModel(int weekday, int numberOfTickets, int zipCode) //Need to have two price models for different parks<<<
         {
             int newprice = 80;
             int[] dayFee = { 5, 6, 7, 8, 9 };
 
             if (numberOfTickets >= 1 && numberOfTickets <= 4)
             {
-                newprice = numberOfTickets * dayFee[weekday] + 80;
+                newprice = (numberOfTickets * dayFee[weekday] + 160) + ((zipCode % 50) * (dayFee[weekday] / 5));
             }
             else if (numberOfTickets >= 5 && numberOfTickets <= 15)
             {
-                newprice = numberOfTickets * dayFee[weekday] + 60;
+                newprice = (numberOfTickets * dayFee[weekday] + 120) + ((zipCode % 50) * (dayFee[weekday] / 5));
 
             }
             else if (numberOfTickets >= 16 && numberOfTickets <= 20)
             {
-                newprice = numberOfTickets * dayFee[weekday] + 40;
+                newprice = (numberOfTickets * dayFee[weekday] + 80) + ((zipCode % 50) * (dayFee[weekday] / 5));
             }
             Park2.ChangePrice(newprice);
         }

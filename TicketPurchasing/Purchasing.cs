@@ -1,61 +1,102 @@
 ﻿using System;
 using System.Threading;
+using System.Globalization;
+using System.Data;
 
-namespace eCommerce 
+namespace eCommerce
 { 
     // Define delegates for events
-    public delegate void priceCutEvent(String parkName, Int32 newPrice);
-    public delegate void purchaseTicketEvent(int numTickets);
+    public delegate void priceCutEvent(String parkName, double newPrice); //Emits to agencies of a price cut
+    public delegate void orderEvent1(int index); //Emits to Park 1 that there is an order
+    public delegate void orderEvent2(int index); //Emits to Park 2 that there is an order
 
-    public class MultiCellBuffer
+    public static class MultiCellBuffer
     {
-        private static Semaphore semaphore;
-        //Need to implement data cells don't really know what these are specifically, are they just OrderObjects? 
-        //From specs we need to implement a semaphore and need a lock mechanism for this, this will most likely take the most time out of the project. <<<
-        public void setOneCell()
-        {
-        }
-        public void getOneCell() //Don't know what return type it should be yet.
-        {
+        private static Semaphore dataCells;
+        private static Order[] orders;
+        private static int numberOfOrders;
+        public static event orderEvent1 OrderInQueue1;
+        public static event orderEvent2 OrderInQueue2;
 
+        public static void init(orderEvent1 park1, orderEvent2 park2)
+        {
+            numberOfOrders = 0;
+            orders = new Order[3];
+            dataCells = new Semaphore(0, 3);
+            dataCells.Release(3);
+            OrderInQueue1 += park1;
+            OrderInQueue2 += park2;
+        }
+
+        // Write data into one of the available cells
+        public static void setOneCell(Order order)
+        {
+            Console.WriteLine("{0}", Thread.CurrentThread.Name);
+            dataCells.WaitOne();
+            
+            lock(orders)
+            {
+                orders[numberOfOrders] = order;
+                numberOfOrders++;
+
+                // Notify the park that there is an order that must be processed
+                if (order.getReceiverID().Equals("Park 1"))
+                    OrderInQueue1((numberOfOrders-1));
+                if (order.getReceiverID().Equals("Park 2"))
+                    OrderInQueue2((numberOfOrders-1));  
+            }
+        }
+
+        // Read data from one of the available cells
+        public static Order getOneCell(int index)
+        {
+            Order processOrder;
+            lock (orders[index])
+            {
+                processOrder = orders[index];
+            }
+            dataCells.Release();
+            numberOfOrders--;
+
+            return processOrder;
         }
     }
 
-    public class OrderProcessing
+    public class Order
     {
         private string senderId;
         private int cardNo;
         private string receiverID;
         private int amount;
         private double unitPrice;
+        private DateTime startTime;
 
-        public string getSenderId() { return senderId; } //Have to decide if the getters and setters need to be synchronous, assuming they should as we don't want the price to fluctuate when making
+        public string getSenderId() { return senderId; }
         public int getCardNo() { return cardNo; }        //a purchase.<<<
         public string getReceiverID() { return receiverID; }
         public int getAmount() { return amount; }
         public double getUnitPrice() { return unitPrice; }
+        public DateTime getStartTime() { return startTime; }
 
         public void setSenderId(string newSender) { senderId = newSender; }
         public void setCardNo(int newCardNo) { cardNo = newCardNo; }
         public void setReceiverId(string newReceiver) { receiverID = newReceiver; }
         public void setAmount(int newAmount) { amount = newAmount; }
         public void setUnitPrice(double newUnitPrice) { unitPrice = newUnitPrice; }
-        public void orderFunc()
-        {
-            //Send the order to Multi-cell buffer?<<<
-        }
-
+        public void setStartTime(DateTime newTime) { startTime = newTime; }
     }
 
     public class Park1
     {
         static Random rng = new Random();
-        public static event priceCutEvent PriceCut; // Link event to delegate
-        private static Int32 ticketPrice = 10;
+        public static event priceCutEvent PriceCut;
+        private static double ticketPrice = 80.0;
         private static int numCuts = 0;
         private static int currentDay = 0;
+        private static int availableTickets = 500;
+        
 
-        public Int32 GetPrice() 
+        public double GetPrice() 
         { 
             return ticketPrice; 
         } 
@@ -77,39 +118,57 @@ namespace eCommerce
         } 
 
         public void SupplierFunc() 
-        { 
+        {
             while(numCuts < 25) 
             { 
-                Thread.Sleep(500); 
-                // Take the order from the queue of the orders; 
-                // Decide the price based on the orders 
-                
-                Int32 r = rng.Next(1, 20);
-                // Console.WriteLine("New Price is {0}", p); 
-                Park1.PriceModel(currentDay,r);
+                Thread.Sleep(500);
+                Park1.PriceModel(currentDay);
                 currentDay++;
                 currentDay %= 5;
             } 
         } 
-        public static void PriceModel(int weekday, int numberOfTickets) //Need to have two price models for different parks<<<
+
+        public static void PriceModel(int weekday)
         {
-            int newprice = 80;
-            int[] dayFee = { 5, 6, 7, 8, 9 };
+            // Every day has a different price, taking into account available tickets left
+            int newTicketPrice = 0;
+            int[] dayFee = { 80, 90, 100, 110, 120 };
 
-            if (numberOfTickets >= 1 && numberOfTickets <= 4)
-            {
-                newprice = numberOfTickets * dayFee[weekday] + 80;
-            }
-            else if (numberOfTickets >= 5 && numberOfTickets <= 15)
-            {
-                newprice = numberOfTickets * dayFee[weekday] + 60;
+            
+            Park1.ChangePrice(newTicketPrice);
+        }
 
-            }
-            else if (numberOfTickets >= 16 && numberOfTickets <= 20)
+        // Event handler for order in queue
+        // Create an order processing thread
+        public void OrderReceived(int orderIndex)
+        {
+            Order order = MultiCellBuffer.getOneCell(orderIndex);
+            Thread process = new Thread(new ParameterizedThreadStart(OrderProcessing));
+            process.Start(order);
+            //check the order
+            //After processing the order, put the thread to sleep to restock tickets
+            
+        }
+
+        public void OrderProcessing(Object processOrder)
+        {
+            Order order = (Order)processOrder;
+            Thread.Sleep(500);
+            DateTime dateOne = order.getStartTime();
+            DateTime dateTwo = DateTime.Now;
+            TimeSpan diff = dateTwo.Subtract(dateOne);
+
+
+            if (order.getCardNo() >= 5000 && order.getCardNo() <= 7000)
             {
-                newprice = numberOfTickets * dayFee[weekday] + 40;
+                double totalAmount = order.getUnitPrice() * order.getAmount();
+                Console.WriteLine("{0}: Order confirmed {1}", order.getSenderId(), diff);
             }
-            Park1.ChangePrice(newprice);
+            else
+            {
+                Console.WriteLine("{0}: Invalid card number", order.getSenderId());
+            }
+            availableTickets -= order.getAmount();
         }
     }
 
@@ -117,14 +176,17 @@ namespace eCommerce
     {
         static Random rng = new Random();
         public static event priceCutEvent PriceCut; // Link event to delegate
-        private static Int32 ticketPrice = 10;
+        private static double ticketPrice = 80.0;
         private static int numCuts = 0;
         private static int currentDay = 0;
-        public Int32 GetPrice()
+        private static int availableTickets = 300;
+
+        public double GetPrice()
         {
             return ticketPrice;
         }
-        public static void ChangePrice(Int32 price)
+
+        public static void ChangePrice(double price)
         {
             // The new price is a price cut 
             if (price < ticketPrice)
@@ -139,6 +201,7 @@ namespace eCommerce
             }
             ticketPrice = price;
         }
+
         public void SupplierFunc()
         {
             while (numCuts < 25)
@@ -155,64 +218,93 @@ namespace eCommerce
                 currentDay %= 5;
             }
         }
+
         public static void PriceModel(int weekday, int numberOfTickets, int zipCode) //Need to have two price models for different parks<<<
         {
-            int newprice = 80;
-            int[] dayFee = { 5, 6, 7, 8, 9 };
+            double newprice = 80;
+            int[] dayFee = {100, 120, 130, 140, 150 };
 
-            if (numberOfTickets >= 1 && numberOfTickets <= 4)
-            {
-                newprice = (numberOfTickets * dayFee[weekday] + 160) + ((zipCode % 50) * (dayFee[weekday] / 5));
-            }
-            else if (numberOfTickets >= 5 && numberOfTickets <= 15)
-            {
-                newprice = (numberOfTickets * dayFee[weekday] + 120) + ((zipCode % 50) * (dayFee[weekday] / 5));
-
-            }
-            else if (numberOfTickets >= 16 && numberOfTickets <= 20)
-            {
-                newprice = (numberOfTickets * dayFee[weekday] + 80) + ((zipCode % 50) * (dayFee[weekday] / 5));
-            }
             Park2.ChangePrice(newprice);
+        }
+
+        // Event handler for order in queue
+        // Create an order processing thread
+        public void OrderReceived(int orderIndex)
+        {
+            Order order = MultiCellBuffer.getOneCell(orderIndex);
+            Thread process = new Thread(new ParameterizedThreadStart(OrderProcessing));
+            process.Start(order);
+            //check the order
+            //After processing the order, put the thread to sleep to restock tickets
+
+        }
+
+        public void OrderProcessing(Object processOrder)
+        {
+            Order order = (Order)processOrder;
+            Thread.Sleep(500);
+            DateTime dateOne = order.getStartTime();
+            DateTime dateTwo = DateTime.Now;
+            TimeSpan diff = dateTwo.Subtract(dateOne);
+         
+
+            if (order.getCardNo() >= 5000 && order.getCardNo() <= 7000)
+            {
+                double totalAmount = order.getUnitPrice() * order.getAmount();
+                Console.WriteLine("{0}: Order confirmed {1}", order.getSenderId(), diff);
+            }
+            else
+            {
+                Console.WriteLine("{0}: Invalid card number", order.getSenderId());
+            }
+            availableTickets -= order.getAmount();
         }
     }
 
-    public class TicketAgency //Need to add a purchase event
+    public class TicketAgency 
     {
-        private int numOfOrders = 0;
+        static Random rng = new Random();
         private int stockOfTickets = 0;
-       
-        public static event purchaseTicketEvent purchaseTicket; //Link ticket purchase event<<<
-        public void NewOrder()
-        {
-           numOfOrders++;
-        }
-        public void TicketAgencyFunc() 
-        { 
-            // Each ticket agency has no ticket stock for each park
-            // Order tickets from each park to sell
-            // Create a loop that makes orders for each agency
-            
 
-        } 
-        public void OrderTickets(int numOfTickets) 
+        public void TicketAgencyFunc() 
         {
-            OrderProcessing newOrder = new OrderProcessing();
-            Thread order = new Thread(new ThreadStart(newOrder.orderFunc));
-            order.Name = ("Order#" + (numOfOrders + 1)).ToString(); //Name should hopefully be Order#1 
-            order.Start();
+            // Each ticket agency has no ticket stock for each park in the beginning
+            OrderTickets("Park 1", 300, 5228, 80);
+            OrderTickets("Park 2", 300, 6228, 100);
+        } 
+
+        public void OrderTickets(String parkName, int numOfTickets, int cardNum, double unitPrice) 
+        {
+            DateTime localDate = DateTime.Now;
+            Order newOrder = new Order();
+            newOrder.setSenderId(Thread.CurrentThread.Name);
+            newOrder.setReceiverId(parkName);
+            newOrder.setAmount(numOfTickets);
+            newOrder.setCardNo(cardNum);
+            newOrder.setUnitPrice(unitPrice);
+            newOrder.setStartTime(localDate);
+            MultiCellBuffer.setOneCell(newOrder);
+            
         }
 
         // Event handler for price cut
-        public void TicketOnSale(String parkName, Int32 newPrice) 
-        { 
+        public void TicketOnSale(String parkName, double unitPrice) 
+        {
             // order tickets from Park – send order into queue 
             // Need to decide if we need to purchase more tickets depending on inventory
-            // And check if it is worth purchasing more
-            // If they have less than 150 tickets then purchase more tickets to get 300 again
+            int cardNum = rng.Next(4500, 7500);
+            // If the ticket agency has less than 150 tickets then purchase more
+            if (stockOfTickets < 150)
+            {
+               
+            }
+            else
+            {
+                // Decide if we want to purchase more
+            }
 
             // profit = priceofticket + .5*priceofticket
-            Console.WriteLine("{0} tickets are on sale as low as ${1} each", parkName, newPrice);  // It prints thread name 
+            Console.WriteLine("{0}: {1} tickets are on sale as low as ${2} each", Thread.CurrentThread.Name, parkName, unitPrice);
         } 
     }
     
@@ -240,6 +332,7 @@ namespace eCommerce
             // Subscribe to event
             Park1.PriceCut += new priceCutEvent(ticketstore.TicketOnSale);
             Park2.PriceCut += new priceCutEvent(ticketstore.TicketOnSale);
+            MultiCellBuffer.init(new orderEvent1(park1.OrderReceived), new orderEvent2(park2.OrderReceived));
 
             // N agencies
             int N = 5;
